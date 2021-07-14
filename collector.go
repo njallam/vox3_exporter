@@ -17,9 +17,9 @@ const namespace = "vox3"
 
 var uptimeRegex = regexp.MustCompile(`(?:(?:(?:(\d+) days?, )?(\d+) hours?, )(\d+) minutes? and )(\d+) seconds?`)
 var speedRegex = regexp.MustCompile(`(\d+) kbps`)
-var snrRegex = regexp.MustCompile(`(\d+) db`)
-var attenuationRegex = regexp.MustCompile(`(?:(\w+) (\w+))+`)
-var powerRegex = regexp.MustCompile(`(\d+) dBm`)
+var snrRegex = regexp.MustCompile(`([\d.]+) dB`)
+var attenuationRegex = regexp.MustCompile(`(\w+) ([\d.]+) dB`)
+var powerRegex = regexp.MustCompile(`([\d.]+) dBm`)
 var delayRegex = regexp.MustCompile(`(\d+) ms`)
 
 type Vox3Collector struct {
@@ -31,12 +31,13 @@ type Vox3Collector struct {
 }
 
 var metrics = map[string]*prometheus.Desc{
-	"dslUptime":             prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "dsl_uptime_seconds"), "DSL uptime in seconds", nil, nil),
-	"numberOfCuts":          prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "number_of_cuts"), "Number of cuts", nil, nil),
-	"currentRateDownstream": prometheus.NewDesc(prometheus.BuildFQName(namespace, "downstream", "current_rate_kbps"), "Current downstream rate in kbps", nil, nil),
-	"currentRateUpstream":   prometheus.NewDesc(prometheus.BuildFQName(namespace, "upstream", "current_rate_kbps"), "Current upstream rate in kbps", nil, nil),
-	"maximumRateDownstream": prometheus.NewDesc(prometheus.BuildFQName(namespace, "downstream", "maximum_rate_kbps"), "Maximum downstream rate in kbps", nil, nil),
-	"maximumRateUpstream":   prometheus.NewDesc(prometheus.BuildFQName(namespace, "upstream", "maximum_rate_kbps"), "Maximum upstream rate in kbps", nil, nil),
+	"dslUptime":    prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "dsl_uptime_seconds"), "DSL uptime in seconds", nil, nil),
+	"numberOfCuts": prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "number_of_cuts"), "Number of cuts", nil, nil),
+	"currentRate":  prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "current_rate_kbps"), "Current rate in kbps", []string{"direction"}, nil),
+	"maximumRate":  prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "maximum_rate_kbps"), "Maximum rate in kbps", []string{"direction"}, nil),
+	"snr":          prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "snr_db"), "Signal-to-noise ratio in dB", []string{"direction"}, nil),
+	"attenuation":  prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "attenuation_db"), "Attenuation in dB", []string{"direction", "channel"}, nil),
+	"power":        prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "power_dbm"), "Power in dBm", []string{"direction"}, nil),
 }
 
 func newVox3Collector(ip string, password string) *Vox3Collector {
@@ -53,6 +54,8 @@ func newVox3Collector(ip string, password string) *Vox3Collector {
 		client:   client,
 	}
 }
+
+var columns = map[int]string{1: "downstream", 2: "upstream"}
 
 func (collector *Vox3Collector) Collect(ch chan<- prometheus.Metric) {
 	collector.Mutex.Lock()
@@ -111,16 +114,35 @@ func (collector *Vox3Collector) Collect(ch chan<- prometheus.Metric) {
 		}
 		switch cells[0] {
 		case "Current Rate":
-			downstream, _ := strconv.Atoi(speedRegex.FindStringSubmatch(cells[1])[1])
-			ch <- prometheus.MustNewConstMetric(metrics["currentRateDownstream"], prometheus.GaugeValue, float64(downstream))
-			upstream, _ := strconv.Atoi(speedRegex.FindStringSubmatch(cells[2])[1])
-			ch <- prometheus.MustNewConstMetric(metrics["currentRateUpstream"], prometheus.GaugeValue, float64(upstream))
+			for i, v := range columns {
+				value, _ := strconv.Atoi(speedRegex.FindStringSubmatch(cells[i])[1])
+				ch <- prometheus.MustNewConstMetric(metrics["currentRate"], prometheus.GaugeValue, float64(value), v)
+			}
 		case "Maximum Rate":
-			downstream, _ := strconv.Atoi(speedRegex.FindStringSubmatch(cells[1])[1])
-			ch <- prometheus.MustNewConstMetric(metrics["maximumRateDownstream"], prometheus.GaugeValue, float64(downstream))
-			upstream, _ := strconv.Atoi(speedRegex.FindStringSubmatch(cells[2])[1])
-			ch <- prometheus.MustNewConstMetric(metrics["maximumRateUpstream"], prometheus.GaugeValue, float64(upstream))
+			for i, v := range columns {
+				value, _ := strconv.Atoi(speedRegex.FindStringSubmatch(cells[i])[1])
+				ch <- prometheus.MustNewConstMetric(metrics["maximumRate"], prometheus.GaugeValue, float64(value), v)
+			}
+		case "Signal-to-Noise Ratio":
+			for i, v := range columns {
+				value, _ := strconv.ParseFloat(snrRegex.FindStringSubmatch(cells[i])[1], 64)
+				ch <- prometheus.MustNewConstMetric(metrics["snr"], prometheus.GaugeValue, float64(value), v)
+			}
+		case "Attenuation":
+			for i, v := range columns {
+				entries := attenuationRegex.FindAllStringSubmatch(cells[i], -1)
+				for _, entry := range entries {
+					value, _ := strconv.ParseFloat(entry[2], 64)
+					ch <- prometheus.MustNewConstMetric(metrics["attenuation"], prometheus.GaugeValue, value, v, entry[1])
+				}
+			}
+		case "Power":
+			for i, v := range columns {
+				value, _ := strconv.ParseFloat(powerRegex.FindStringSubmatch(cells[i])[1], 64)
+				ch <- prometheus.MustNewConstMetric(metrics["power"], prometheus.GaugeValue, value, v)
+			}
 		}
+
 	})
 
 }

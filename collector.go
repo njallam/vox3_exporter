@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/cookiejar"
@@ -14,6 +16,9 @@ import (
 )
 
 const namespace = "vox3"
+
+var loginRegex = regexp.MustCompile(`<form id="loginfrm">`)
+var csrfRegex = regexp.MustCompile(`<meta name="CSRFtoken" content="(\w+)">`)
 
 var uptimeRegex = regexp.MustCompile(`(?:(?:(?:(\d+) days?, )?(\d+) hours?, )(\d+) minutes? and )(\d+) seconds?`)
 var speedRegex = regexp.MustCompile(`(\d+) kbps`)
@@ -57,33 +62,42 @@ func newVox3Collector(ip string, password string) *Vox3Collector {
 
 var columns = map[int]string{1: "downstream", 2: "upstream"}
 
-func (collector *Vox3Collector) Collect(ch chan<- prometheus.Metric) {
+func (collector *Vox3Collector) Fetch(path string) *bytes.Reader {
 	collector.Mutex.Lock()
 	defer collector.Mutex.Unlock()
-	response, err := collector.client.Get(collector.baseURL + "/modals/status-support/vdslStatus.lp")
+	response, err := collector.client.Get(collector.baseURL + path)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer response.Body.Close()
-	document, err := goquery.NewDocumentFromReader(response.Body)
+	data, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		log.Fatal("Error loading HTTP response body", err)
+		log.Fatal(err)
 	}
-	if document.Find("#loginfrm").Length() > 0 {
-		token, exists := document.Find("meta[name=CSRFtoken]").Attr("content")
-		if !exists {
+	if loginRegex.Match(data) {
+		token := csrfRegex.FindStringSubmatch(string(data))[1]
+		if len(token) == 0 {
 			log.Fatal("No CSRF token")
 		}
 		collector.login(token)
-		response, err = collector.client.Get(collector.baseURL + "/modals/status-support/vdslStatus.lp")
+		response, err = collector.client.Get(collector.baseURL + path)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer response.Body.Close()
-		document, err = goquery.NewDocumentFromReader(response.Body)
+		data, err = ioutil.ReadAll(response.Body)
 		if err != nil {
-			log.Fatal("Error loading HTTP response body", err)
+			log.Fatal(err)
 		}
+	}
+	return bytes.NewReader(data)
+}
+
+func (collector *Vox3Collector) Collect(ch chan<- prometheus.Metric) {
+	data := collector.Fetch("/modals/status-support/vdslStatus.lp")
+	document, err := goquery.NewDocumentFromReader(data)
+	if err != nil {
+		log.Fatal("Error loading HTTP response body", err)
 	}
 
 	uptimes := uptimeRegex.FindStringSubmatch(document.Find("#adslStat_info_uptime").Text())
@@ -142,7 +156,6 @@ func (collector *Vox3Collector) Collect(ch chan<- prometheus.Metric) {
 				ch <- prometheus.MustNewConstMetric(metrics["power"], prometheus.GaugeValue, value, v)
 			}
 		}
-
 	})
 
 }

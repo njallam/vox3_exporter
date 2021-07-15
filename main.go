@@ -9,8 +9,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-const metricsPath = "/metrics"
-
 func main() {
 	log.Println("Starting Vox3 Exporter")
 
@@ -28,7 +26,7 @@ func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<html><head><title>Vox3 Exporter</title></head><body><h1>Vox3 exporter</h1><p><a href="metrics">Metrics</a></p></body></html>`))
 	})
-	http.Handle(metricsPath, promhttp.Handler())
+	http.Handle("/metrics", promhttp.Handler())
 	log.Println("Beginning to serve on port :9917")
 	log.Fatal(http.ListenAndServe(":9917", nil))
 }

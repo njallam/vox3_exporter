@@ -1,6 +1,7 @@
 package main
 
 import (
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -21,12 +22,26 @@ func main() {
 		log.Fatalf("Missing environment variable VOX3_PASSWORD")
 	}
 
-	prometheus.MustRegister(newVox3Collector(ip, os.Getenv("VOX3_PASSWORD")))
+	collector := newVox3Collector(ip, os.Getenv("VOX3_PASSWORD"))
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<html><head><title>Vox3 Exporter</title></head><body><h1>Vox3 exporter</h1><p><a href="metrics">Metrics</a></p></body></html>`))
+	prometheus.MustRegister(collector)
+
+	templates := template.Must(template.ParseFiles("nat.html"))
+
+	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
+		rw.Write([]byte(`<html><head><title>Vox3 Exporter</title></head>` +
+			`<body><h1>Vox3 exporter</h1>` +
+			`<p><a href="metrics">Metrics</a></p>` +
+			`<p><a href="nat">NAT Table</a></p>` +
+			`</body></html>`))
 	})
 	http.Handle("/metrics", promhttp.Handler())
+	http.HandleFunc("/nat", func(rw http.ResponseWriter, r *http.Request) {
+
+		table := collector.FetchNAT()
+
+		templates.Execute(rw, table)
+	})
 	log.Println("Beginning to serve on port :9917")
 	log.Fatal(http.ListenAndServe(":9917", nil))
 }

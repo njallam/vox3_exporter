@@ -62,7 +62,7 @@ func newVox3Collector(ip string, password string) *Vox3Collector {
 
 var columns = map[int]string{1: "downstream", 2: "upstream"}
 
-func (collector *Vox3Collector) Fetch(path string) *bytes.Reader {
+func (collector *Vox3Collector) Fetch(path string) []byte {
 	collector.Mutex.Lock()
 	defer collector.Mutex.Unlock()
 	response, err := collector.client.Get(collector.baseURL + path)
@@ -90,12 +90,12 @@ func (collector *Vox3Collector) Fetch(path string) *bytes.Reader {
 			log.Fatal(err)
 		}
 	}
-	return bytes.NewReader(data)
+	return data
 }
 
 func (collector *Vox3Collector) Collect(ch chan<- prometheus.Metric) {
 	data := collector.Fetch("/modals/status-support/vdslStatus.lp")
-	document, err := goquery.NewDocumentFromReader(data)
+	document, err := goquery.NewDocumentFromReader(bytes.NewReader(data))
 	if err != nil {
 		log.Fatal("Error loading HTTP response body", err)
 	}

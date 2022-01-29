@@ -21,8 +21,9 @@ func main() {
 	if len(password) == 0 {
 		log.Fatalf("Missing environment variable VOX3_PASSWORD")
 	}
+	natTableEnabled := len(os.Getenv("VOX3_NAT_TABLE")) > 0
 
-	collector := newVox3Collector(ip, os.Getenv("VOX3_PASSWORD"))
+	collector := newVox3Collector(ip, password)
 
 	prometheus.MustRegister(collector)
 
@@ -36,12 +37,14 @@ func main() {
 			`</body></html>`))
 	})
 	http.Handle("/metrics", promhttp.Handler())
-	http.HandleFunc("/nat", func(rw http.ResponseWriter, r *http.Request) {
 
-		table := collector.FetchNAT()
+	if natTableEnabled {
+		http.HandleFunc("/nat", func(rw http.ResponseWriter, r *http.Request) {
+			table := collector.FetchNAT()
+			templates.Execute(rw, table)
+		})
+	}
 
-		templates.Execute(rw, table)
-	})
 	log.Println("Beginning to serve on port :9917")
 	log.Fatal(http.ListenAndServe(":9917", nil))
 }

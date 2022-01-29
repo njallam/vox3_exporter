@@ -23,9 +23,10 @@ func main() {
 	}
 	natTableEnabled := len(os.Getenv("VOX3_NAT_TABLE")) > 0
 
+	registry := prometheus.NewRegistry()
 	collector := newVox3Collector(ip, password)
 
-	prometheus.MustRegister(collector)
+	registry.MustRegister(collector)
 
 	templates := template.Must(template.ParseFiles("nat.html"))
 
@@ -36,7 +37,7 @@ func main() {
 			`<p><a href="nat">NAT Table</a></p>` +
 			`</body></html>`))
 	})
-	http.Handle("/metrics", promhttp.Handler())
+	http.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 
 	if natTableEnabled {
 		http.HandleFunc("/nat", func(rw http.ResponseWriter, r *http.Request) {
